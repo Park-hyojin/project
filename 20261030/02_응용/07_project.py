@@ -11,7 +11,7 @@
 4. 모델 학습 및 평가
 5. 최적 모델 선정 및 복원
 6. 클래스별 성능 평가
-7. 결과 분석 및 저장
+7. 결과 저장 및 시각화
 """
 
 from pathlib import Path
@@ -53,7 +53,7 @@ summary = []
 
 for config in configs:
     # 3. 모델 생성
-    # 동일한 초기화 Seed를 사용하고 설정에 따라 Dropout 적용
+    # 동일한 초기화 Seed로 모델을 생성하고 설정에 따라 Dropout 비율 변경
     torch.manual_seed(42)
     width = config.get("width", 32)
     layers = [nn.Linear(2, width)]
@@ -66,10 +66,11 @@ for config in configs:
     model = nn.Sequential(*layers).to(device)
 
     # 4. 모델 학습 및 평가
-    # 동일한 데이터 셔플 순서와 Batch Size로 학습
+    # 동일한 Batch Size와 셔플 Seed를 사용해 데이터 로더 생성
     loader = DataLoader(TensorDataset(X_train, y_train), batch_size=32, shuffle=True,
                         generator=torch.Generator().manual_seed(43), num_workers=0)
 
+    # 설정에 따라 SGD 또는 AdamW Optimizer 생성
     if config.get("optimizer", "AdamW") == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=config["lr"],
                                     momentum=config.get("momentum", 0.0), weight_decay=0.0)
@@ -80,6 +81,7 @@ for config in configs:
     best_loss = float("inf")
     best_state = None
 
+    # 150 Epoch 동안 Batch별 순전파·역전파 및 가중치 갱신
     for epoch in range(1, 151):
         model.train()
         for xb, yb in loader:
@@ -97,7 +99,7 @@ for config in configs:
             valid_loss = loss_fn(logits, y_valid).item()
             valid_acc = (logits.argmax(1) == y_valid).float().mean().item()
 
-            # Valid Loss가 개선되면 최적 Epoch와 독립된 가중치 복사본 저장
+            # Valid Loss가 개선되면 최저 Loss와 가중치 복사본 저장
             if valid_loss < best_loss:
                 best_loss = valid_loss
                 best_state = copy.deepcopy(model.state_dict())
@@ -110,7 +112,8 @@ for config in configs:
     best = table.loc[table["valid_loss"].idxmin()]
     name = config["name"]
 
-    summary.append({**config, "best_epoch": int(best["epoch"]),
+    summary.append({**config, 
+                    "best_epoch": int(best["epoch"]),
                     "best_valid_loss": float(best["valid_loss"]),
                     "valid_acc_at_best": float(best["valid_acc"]),
                     "last_train_loss_eval": train_loss, "last_valid_loss": valid_loss})
@@ -141,7 +144,7 @@ for config in configs:
                            "correct": correct,
                            "recall": recall,})
 
-    # 7. 결과 분석 및 저장
+    # 7. 결과 저장 및 시각화
     # Epoch별 학습 기록과 클래스별 평가 및 예측 결과 저장
     table.to_csv(out / f"07_{name}_history.csv", index=False)
     pd.DataFrame(class_rows).to_csv(out / f"07_{name}_class_metrics.csv", index=False)
